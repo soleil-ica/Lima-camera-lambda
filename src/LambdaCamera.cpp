@@ -656,10 +656,10 @@ void Camera::setSaturationFlag(bool flag)
     }
 }
 
-//---------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------------
 //! Camera::getSaturationThreshold()
-//! get the value of current threshold for saturation flag
-//---------------------------------------------------------------------------------------
+//! get the value of actual saturation threshold in counts per second per pixel of the specified module
+//----------------------------------------------------------------------------------------------------
 void Camera::getSaturationThreshold(int &saturation_threshold)
 {
     //saturationThreshold(int module_nr)
@@ -669,7 +669,7 @@ void Camera::getSaturationThreshold(int &saturation_threshold)
 
 //---------------------------------------------------------------------------------------
 //! Camera::setSaturationThreshold()
-//! sets threshold for saturation flag
+//! sets global saturation threshold in counts per second per pixel
 //---------------------------------------------------------------------------------------
 void Camera::setSaturationThreshold(int saturation_threshold)
 {
