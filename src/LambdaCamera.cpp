@@ -633,7 +633,7 @@ void Camera::setLinearityCorrection(bool flag)
 
 //---------------------------------------------------------------------------------------
 //! Camera::getSaturationFlag()
-//! get the value of if flagging of pixel saturation is enabled
+//! returns whether flagging of saturated pixels is enabled
 //---------------------------------------------------------------------------------------
 void Camera::getSaturationFlag(bool &is_on)
 {
@@ -648,6 +648,8 @@ void Camera::setSaturationFlag(bool flag)
 {
     if (flag)
     {
+        //If the count is above a saturation threshold 
+        //then the MSB of the unused bits within the frame is set
         detector->enableSaturationFlag();
     }
     else
@@ -658,7 +660,7 @@ void Camera::setSaturationFlag(bool flag)
 
 //----------------------------------------------------------------------------------------------------
 //! Camera::getSaturationThreshold()
-//! get the value of actual saturation threshold in counts per second per pixel of the specified module
+//! get the value of actual saturation threshold in counts/s/pixel of the specified module
 //----------------------------------------------------------------------------------------------------
 void Camera::getSaturationThreshold(int &saturation_threshold)
 {
@@ -669,12 +671,13 @@ void Camera::getSaturationThreshold(int &saturation_threshold)
 
 //---------------------------------------------------------------------------------------
 //! Camera::setSaturationThreshold()
-//! sets global saturation threshold in counts per second per pixel
+//! sets global saturation threshold in counts/s/pixel
 //---------------------------------------------------------------------------------------
 void Camera::setSaturationThreshold(int saturation_threshold)
 {
     //setSaturationThreshold(int module_nr, int n)
     //module_nr: module number
     //n: saturation threshold in counts/s/px
-    detector->setSaturationThreshold(1, saturation_threshold);
+    int module_nr = 1;
+    detector->setSaturationThreshold(module_nr, saturation_threshold);
 }
