@@ -124,6 +124,8 @@ void Camera::CameraThread::execStartAcq()
                 m_nDataType = 1; //short
             else if(nDepth == 24)
                 m_nDataType = 2; //int
+            else if (nDepth == 6 || nDepth == 1)
+                m_nDataType = 3; //uint8_t
 
             //- get the Frame
             frame =  m_cam->receiver->frame(1500);
@@ -143,11 +145,14 @@ void Camera::CameraThread::execStartAcq()
                 else
                 {
 
-                    if(m_nDataType == 1) // short (12 bits)
-                        memcpy((short*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
-                    else if(m_nDataType == 2) // int (24 bits)
-                        memcpy((int*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                if(m_nDataType == 1) // short (12 bits)
+                    memcpy((short*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                else if(m_nDataType == 2) // int (24 bits)
+                    memcpy((int*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                else if(m_nDataType == 3) // 1 byte (6 bits ou 1 bit)
+                    memcpy((uint8_t*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
                 }
+
                 m_cam->receiver->release(frame);
             }
 
@@ -295,7 +300,6 @@ void Camera::setNbFrames(int nb_frames)
     } 
     else 
     {
-      DEB_TRACE() << "Camera::setNbFrames - frameCount = " << nb_frames;
       detector->setFrameCount(nb_frames);
     }
     m_nb_frames = nb_frames;
@@ -567,7 +571,11 @@ void Camera::setImageType(ImageType type)
     DEB_TRACE() << "Camera::setImageType - " << DEB_VAR1(type);
 
     xsp::lambda::BitDepth depth;
-    if(type == Bpp12)
+    if(type == Bpp1)
+        depth = xsp::lambda::BitDepth::DEPTH_1;
+    else if(type == Bpp6)
+        depth = xsp::lambda::BitDepth::DEPTH_6;
+    else if(type == Bpp12)
         depth = xsp::lambda::BitDepth::DEPTH_12;
     else if(type == Bpp24)
         depth = xsp::lambda::BitDepth::DEPTH_24;
@@ -585,7 +593,11 @@ void Camera::getImageType(ImageType& type)
     xsp::lambda::BitDepth depth;
     depth = detector->bitDepth();
 
-    if(depth == xsp::lambda::BitDepth::DEPTH_12)
+    if(depth == xsp::lambda::BitDepth::DEPTH_1)
+        type = Bpp1;
+    else if(depth == xsp::lambda::BitDepth::DEPTH_6)
+        type = Bpp6;
+    else if(depth == xsp::lambda::BitDepth::DEPTH_12)
         type = Bpp12;
     else if(depth == xsp::lambda::BitDepth::DEPTH_24)
         type = Bpp24;
@@ -777,6 +789,7 @@ void Camera::setChargeSumming(int is_charge_summing)
     }
 }
 
+
 //---------------------------------------------------------------------------------------
 //! ICATHALES-582 - Frame summing by accumulation
 //! Camera Frame summing setting params
@@ -817,6 +830,10 @@ void Camera::checkDependency(double exposure_i)
         throw LIMA_HW_EXC(InvalidValue, "Exposure by frame should be positive and not null !");
 }
 
+//---------------------------------------------------------------------------------------
+//! Camera::setExposureAccuTime()
+//! sets exposure Accu Time
+//---------------------------------------------------------------------------------------
 void Camera::setExposureAccuTime(double exposureAccuTime)
 { 
     DEB_MEMBER_FUNCT();
@@ -828,7 +845,59 @@ void Camera::setExposureAccuTime(double exposureAccuTime)
     m_exposure_i = exposureByFrame;
 }
 
+//---------------------------------------------------------------------------------------
+//! Camera::setAccumulationMode()
+//! sets HW Accumulation Mode
+//---------------------------------------------------------------------------------------
 void Camera::setAccumulationMode(bool accumulationMode)
 {
     m_is_accumulation_mode = accumulationMode;
 }
+
+
+//---------------------------------------------------------------------------------------
+//! Camera::setAcquisitionMode()
+//! sets hw acquisition mode
+//---------------------------------------------------------------------------------------
+void Camera::setAcquisitionMode(int acq_mode)
+{
+    DEB_MEMBER_FUNCT();
+    DEB_TRACE() << "Camera::setAcquisitionMode - " << DEB_VAR1(acq_mode);
+
+    if (acq_mode != 1 && acq_mode != 6 && acq_mode != 12 && acq_mode != 24)
+        throw LIMA_HW_EXC(InvalidValue, "Acquisition mode should be 1, 6, 12 or 24 bits");
+
+    if ((acq_mode == 1 || acq_mode == 6) && !hasFeature(xsp::lambda::Feature::FEAT_1_6_BIT))
+        throw LIMA_HW_EXC(Error, "The device does not support 1 and 6 bits");
+
+    switch(acq_mode) 
+    {
+        case  1: detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_1); break;
+        case  6: detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_6); break;
+        case 12: detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_12); break;
+        case 24: detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_24); break;
+        default: break;
+    }
+    //m_acquisition_mode = acq_mode;
+}
+
+//---------------------------------------------------------------------------------------
+//! Camera::getAcquisitionMode()
+//! gets hw acquisition mode
+//---------------------------------------------------------------------------------------
+void Camera::getAcquisitionMode(int &acq_mode)
+{
+    DEB_MEMBER_FUNCT();
+    //acq_mode = m_acquisition_mode;
+    xsp::lambda::BitDepth bitDepth = detector->bitDepth();
+    switch(bitDepth) 
+    {
+        case xsp::lambda::BitDepth::DEPTH_1 : acq_mode =  1; break;
+        case xsp::lambda::BitDepth::DEPTH_6 : acq_mode =  6; break;
+        case xsp::lambda::BitDepth::DEPTH_12: acq_mode = 12; break;
+        case xsp::lambda::BitDepth::DEPTH_24: acq_mode = 24; break;
+        default: break;
+    }
+    DEB_RETURN() << DEB_VAR1(acq_mode);
+}
+

@@ -90,11 +90,16 @@ public:
 	void getChargeSumming(bool &is_charge_summing);
 	void setChargeSumming(int is_charge_summing);
 
+
 	// Frame summing
 	void checkDependency(double exposure_i);
-
 	void setExposureAccuTime(double exposure_i);
 	void setAccumulationMode(bool accumulationMode);
+
+	// Acquisition mode
+	void setAcquisitionMode(int acq_mode);
+	void getAcquisitionMode(int &acq_mode);
+
 
 private:
 	class CameraThread: public CmdThread
