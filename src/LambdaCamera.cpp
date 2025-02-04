@@ -99,7 +99,7 @@ void Camera::CameraThread::execStartAcq()
     
     int acq_frame_nb;
     int nb_frames = m_cam->m_nb_frames;
-        
+
     // start acquisition
     DEB_TRACE() << "Starting Acquisition...";
     m_cam->detector->startAcquisition();
@@ -134,11 +134,20 @@ void Camera::CameraThread::execStartAcq()
         
                 void *ptr = buffer_mgr.getFrameBufferPtr(acq_frame_nb);
 
-                if(m_nDataType == 1) // short (12 bits)
-                    memcpy((short*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
-                else if(m_nDataType == 2) // int (24 bits)
-                    memcpy((int*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
-                
+                if (m_cam->receiver->summedFrames() > 1)
+                {
+                    //DEB_TRACE() << "CameraThread::execStartAcq - in Accu mode : summedFrames() > 1";
+                    // En mode accumulation image en 32 bits 
+                    memcpy((int32_t*)ptr, frame->data(), frame->size());
+                }
+                else
+                {
+
+                    if(m_nDataType == 1) // short (12 bits)
+                        memcpy((short*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                    else if(m_nDataType == 2) // int (24 bits)
+                        memcpy((int*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                }
                 m_cam->receiver->release(frame);
             }
 
@@ -286,6 +295,7 @@ void Camera::setNbFrames(int nb_frames)
     } 
     else 
     {
+      DEB_TRACE() << "Camera::setNbFrames - frameCount = " << nb_frames;
       detector->setFrameCount(nb_frames);
     }
     m_nb_frames = nb_frames;
@@ -337,7 +347,32 @@ void Camera::startAcq()
 
     m_thread.m_force_stop = false;
     m_acq_frame_nb = 0;
-
+    /////////////////////////////
+    if(m_is_accumulation_mode)
+    {  
+        receiver->setSummedFrames(int(m_exposure/m_exposure_i));
+        bool is_summed = receiver->frameSummingEnabled();
+        DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
+        int N = receiver->summedFrames();    
+        DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
+        detector->setFrameCount(m_nb_frames*N);
+        DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames*N;
+        detector->setShutterTime(m_exposure_i);
+        DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure_i;
+    }
+    else
+    {
+        receiver->setSummedFrames(int(1));
+        bool is_summed = receiver->frameSummingEnabled();
+        DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
+        int N = receiver->summedFrames();    
+        DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
+        detector->setFrameCount(m_nb_frames);
+        DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames;
+        detector->setShutterTime(m_exposure);
+        DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure;
+    }
+    /////////////////////////////
     m_thread.sendCmd(CameraThread::StartAcq);
     m_thread.waitNotStatus(CameraThread::Ready);
 }
@@ -740,4 +775,60 @@ void Camera::setChargeSumming(int is_charge_summing)
     {
         detector->setChargeSumming(xsp::lambda::ChargeSumming::OFF);
     }
+}
+
+//---------------------------------------------------------------------------------------
+//! ICATHALES-582 - Frame summing by accumulation
+//! Camera Frame summing setting params
+//! globalExposure = exposure_i * N
+//---------------------------------------------------------------------------------------
+void Camera::checkDependency(double exposure_i)
+{
+    // Check image bits
+    xsp::lambda::OperationMode om = detector->operationMode();
+    if (exposure_i > 1)
+    {
+        if (om.bit_depth != xsp::lambda::BitDepth::DEPTH_24)
+            throw LIMA_HW_EXC(InvalidValue, "Exposure by frame is not conform with operation mode : 24 bits image required !");
+        //detector->setOperationMode(OperationMode(xsp::lambda::BitDepth::DEPTH_24));
+        //detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_24);
+    }
+    else if (exposure_i >= 0.5)
+    {
+        if (om.bit_depth != xsp::lambda::BitDepth::DEPTH_12)
+            throw LIMA_HW_EXC(InvalidValue, "Exposure by frame is not conform with operation mode : 12 bits image required !");
+        //detector->setOperationMode(OperationMode(xsp::lambda::BitDepth::DEPTH_12));
+        //detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_12);
+    }
+    else if (exposure_i >= 0.25)
+    {
+        if (om.bit_depth != xsp::lambda::BitDepth::DEPTH_6)
+            throw LIMA_HW_EXC(InvalidValue, "Exposure by frame is not conform with operation mode : 6 bits image required !");
+        //detector->setOperationMode(OperationMode(xsp::lambda::BitDepth::DEPTH_6));
+        //detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_6);
+    }
+    else if (exposure_i > 0.0) {
+        if (om.bit_depth != xsp::lambda::BitDepth::DEPTH_1)
+            throw LIMA_HW_EXC(InvalidValue, "Exposure by frame is not conform with operation mode : 1 bit image required !");
+        //detector->setOperationMode(OperationMode(xsp::lambda::BitDepth::DEPTH_1));
+        //detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_1);
+    }
+    else 
+        throw LIMA_HW_EXC(InvalidValue, "Exposure by frame should be positive and not null !");
+}
+
+void Camera::setExposureAccuTime(double exposureAccuTime)
+{ 
+    DEB_MEMBER_FUNCT();
+    DEB_TRACE() << "Camera::setExposureAccuTime - " << DEB_VAR1(exposureAccuTime);
+    double exposureByFrame = exposureAccuTime;
+    if (exposureByFrame <= 0.0 || exposureByFrame > m_exposure)
+        LIMA_HW_EXC(InvalidValue, "Exposure by frame should be positive, greather than zero, in milliseconds and less than global exposure.");
+
+    m_exposure_i = exposureByFrame;
+}
+
+void Camera::setAccumulationMode(bool accumulationMode)
+{
+    m_is_accumulation_mode = accumulationMode;
 }
