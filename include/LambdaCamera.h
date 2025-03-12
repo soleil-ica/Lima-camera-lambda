@@ -18,7 +18,7 @@ namespace Lambda
   typedef unique_ptr<xsp::System> uptr_sys;
   typedef shared_ptr<xsp::lambda::Detector> sptr_det;
   //typedef shared_ptr<xsp::Receiver> sptr_recv;
-  typedef shared_ptr<xsp::PostDecoder> sptr_recv;
+  typedef shared_ptr<xsp::PostDecoder> sptr_dec;
   
 //    class Camera
 class LIBLAMBDA_API Camera
@@ -37,7 +37,7 @@ public:
 	
 	uptr_sys libxsp_system;
 	sptr_det detector;
-	sptr_recv receiver;
+	sptr_dec decoder;
 	
 	void getExpTime(double& exp_time);
 	void setExpTime(double  exp_time);

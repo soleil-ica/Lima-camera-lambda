@@ -111,24 +111,15 @@ void Camera::CameraThread::execStartAcq()
     bool continueAcq = true;
     while(continueAcq && (!m_cam->m_nb_frames || m_cam->m_acq_frame_nb < m_cam->m_nb_frames))
     {
-          if(m_cam->receiver->framesQueued() > 0)
+        if(m_cam->decoder->framesQueued() > 0)
         {
             const xsp::Frame* frame;
 
             int nDepth;
-            int m_nDataType;
-
-            nDepth = m_cam->receiver->frameDepth();
-        
-            if(nDepth == 12)
-                m_nDataType = 1; //short
-            else if(nDepth == 24)
-                m_nDataType = 2; //int
-            else if (nDepth == 6 || nDepth == 1)
-                m_nDataType = 3; //uint8_t
+            nDepth = m_cam->decoder->frameDepth();
 
             //- get the Frame
-            frame =  m_cam->receiver->frame(1500);
+            frame =  m_cam->decoder->frame(1500);//timeout 1500 ms !
             if (frame != nullptr)
             {    
                 DEB_TRACE() << "Prepare the Frame ptr - " << DEB_VAR1(acq_frame_nb);
@@ -136,24 +127,30 @@ void Camera::CameraThread::execStartAcq()
         
                 void *ptr = buffer_mgr.getFrameBufferPtr(acq_frame_nb);
 
-                if (m_cam->receiver->summedFrames() > 1)
+                //if accumulation mode enabled
+                if (m_cam->decoder->frameSummingEnabled())
                 {
-                    //DEB_TRACE() << "CameraThread::execStartAcq - in Accu mode : summedFrames() > 1";
+                    //DEB_TRACE() << "CameraThread::execStartAcq - in Accu mode : frame Summing Enabled";
                     // En mode accumulation image en 32 bits 
                     memcpy((int32_t*)ptr, frame->data(), frame->size());
                 }
                 else
                 {
-
-                if(m_nDataType == 1) // short (12 bits)
-                    memcpy((short*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
-                else if(m_nDataType == 2) // int (24 bits)
-                    memcpy((int*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
-                else if(m_nDataType == 3) // 1 byte (6 bits ou 1 bit)
-                    memcpy((uint8_t*)ptr, frame->data(), frame->size()); //we need a nb of BYTES .
+                    if(nDepth == 1)         // 1 byte (1 bits)
+                        memcpy((uint8_t*)ptr, frame->data(), frame->size());    //we need a nb of BYTES .     
+                    else if(nDepth == 6)    // 1 byte (6 bits)
+                        memcpy((uint8_t*)ptr, frame->data(), frame->size());    //we need a nb of BYTES . 
+                    else if(nDepth == 12)   // 2  bytes, short (12 bits )                 
+                        memcpy((short*)ptr, frame->data(), frame->size());      //we need a nb of BYTES .
+                    else if(nDepth == 24)   // 4 bytes, int (24 bits)
+                        memcpy((int*)ptr, frame->data(), frame->size());        //we need a nb of BYTES .                  
                 }
-
-                m_cam->receiver->release(frame);
+                
+                DEB_TRACE() << "frame connector - " <<frame->connector();        
+                DEB_TRACE() << "frame nr - "        <<frame->nr();        
+                DEB_TRACE() << "frame trigger - "   <<frame->trigger();        
+                DEB_TRACE() << "frame subframe - "  <<frame->subframe();        
+                m_cam->decoder->release(frame);
             }
 
             buffer_mgr.setStartTimestamp(Timestamp::now());
@@ -219,29 +216,26 @@ Camera::Camera(std::string& config_file):
         THROW_HW_ERROR(Error) << "Cannot initialize detector connection, reason: \n" << e.what();
     }
 
-    detector = std::dynamic_pointer_cast<xsp::lambda::Detector>(
-                                   libxsp_system->detector("lambda")
-                                   );
+    detector = std::dynamic_pointer_cast<xsp::lambda::Detector>(libxsp_system->detector("lambda"));
 
     //- get detector model
     m_detector_model = "";
     std::stringstream ss;
     auto chip_ids = detector->chipIds(1);
-    ss << "Nb. modules " << detector->numberOfModules()
-       <<" - Mod #1 Id "<< chip_ids[0];
+    ss << "Nb. modules " << detector->numberOfModules() <<" - Mod #1 Id "<< chip_ids[0];
     m_detector_model = ss.str();
 
     try
     {
         //receiver = libxsp_system->receiver("lambda/1");
-        receiver = libxsp_system->postDecoder("lambda"); //- work with several receivers
+        decoder = libxsp_system->postDecoder("lambda"); //- work with several receivers
     }
     catch(const xsp::Error& e)
     {
         THROW_HW_ERROR(Error) << "xsp error: " << e.what() << " (with config file: " << config_file << ")";
     }
     
-    m_size = Size(receiver->frameWidth(),receiver->frameHeight());
+    m_size = Size(decoder->frameWidth(),decoder->frameHeight());
     
     m_thread.start();
 }
@@ -296,11 +290,11 @@ void Camera::setNbFrames(int nb_frames)
       
     if(nb_frames == 0)
     {
-      detector->setFrameCount(16777215); //- Max possible value (3 bytes integer : 24 bits)
+      detector->setFrameCount((unsigned int)16777215); //- Max possible value (3 bytes integer : 24 bits)
     } 
     else 
     {
-      detector->setFrameCount(nb_frames);
+      detector->setFrameCount((unsigned int)nb_frames);
     }
     m_nb_frames = nb_frames;
 }
@@ -354,24 +348,24 @@ void Camera::startAcq()
     /////////////////////////////
     if(m_is_accumulation_mode)
     {  
-        receiver->setSummedFrames(int(m_exposure/m_exposure_i));
-        bool is_summed = receiver->frameSummingEnabled();
+        decoder->setSummedFrames((unsigned int)(m_exposure/m_exposure_i));
+        bool is_summed = decoder->frameSummingEnabled();
         DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
-        int N = receiver->summedFrames();    
+        int N = decoder->summedFrames();    
         DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
-        detector->setFrameCount(m_nb_frames*N);
+        detector->setFrameCount((unsigned int)(m_nb_frames*N));
         DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames*N;
         detector->setShutterTime(m_exposure_i);
         DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure_i;
     }
     else
     {
-        receiver->setSummedFrames(int(1));
-        bool is_summed = receiver->frameSummingEnabled();
+        decoder->setSummedFrames((unsigned int)(1));
+        bool is_summed = decoder->frameSummingEnabled();
         DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
-        int N = receiver->summedFrames();    
+        int N = decoder->summedFrames();    
         DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
-        detector->setFrameCount(m_nb_frames);
+        detector->setFrameCount((unsigned int)(m_nb_frames));
         DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames;
         detector->setShutterTime(m_exposure);
         DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure;

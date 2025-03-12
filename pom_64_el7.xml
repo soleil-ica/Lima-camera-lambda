@@ -70,7 +70,7 @@
 								<name>xsp</name>
 								<type>shared</type>
 								<directory>sdk/bin/</directory>
-							</lib>
+							</lib>                           
 						</libs>
                     </linker>
                     <libraries>
