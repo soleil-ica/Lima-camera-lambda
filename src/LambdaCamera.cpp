@@ -105,6 +105,25 @@ void Camera::CameraThread::execStartAcq()
     m_cam->detector->startAcquisition();
     DEB_TRACE() << "Acquisition Started";
     
+    auto det_depth = m_cam->detector->bitDepth();
+    switch (det_depth) 
+    {
+        case xsp::lambda::BitDepth::DEPTH_1:
+            DEB_TRACE() << "Detector Depth : 1 bits";
+        break;
+        case xsp::lambda::BitDepth::DEPTH_6:
+            DEB_TRACE() << "Detector Depth : 6 bits";
+        break;
+        case xsp::lambda::BitDepth::DEPTH_12:
+            DEB_TRACE() << "Detector Depth : 12 bits";
+        break;
+        case xsp::lambda::BitDepth::DEPTH_24:
+            DEB_TRACE() << "Detector Depth : 24 bits";
+        break;
+        }
+    
+    
+    Timestamp t0 = Timestamp::now();
     m_cam->m_acq_frame_nb = 0;
     acq_frame_nb = 0;
 
@@ -115,16 +134,20 @@ void Camera::CameraThread::execStartAcq()
         {
             const xsp::Frame* frame;
 
-            int nDepth;
-            nDepth = m_cam->decoder->frameDepth();
-
+            int frame_depth = m_cam->decoder->frameDepth();
+            DEB_TRACE() << "Frame Depth : " <<frame_depth<<" bits";
             //- get the Frame
-            frame =  m_cam->decoder->frame(1500);//timeout 1500 ms !
+            frame =  m_cam->decoder->frame(3000);//timeout 3000 ms !
+            Timestamp t1 = Timestamp::now();
+            double delta_time = t1 - t0;
+            DEB_TRACE() << "frame elapsed time : " << (int) (delta_time * 1000) << " (ms)";            
             if (frame != nullptr)
             {    
-                DEB_TRACE() << "Prepare the Frame ptr - " << DEB_VAR1(acq_frame_nb);
                 setStatus(Readout);
-        
+                DEB_TRACE() << "frame nr : "        <<frame->nr();        
+                DEB_TRACE() << "frame trigger: "    <<frame->trigger();  
+                
+                DEB_TRACE() << "Prepare Lima Frame ptr - acq_frame_nb : " << acq_frame_nb;
                 void *ptr = buffer_mgr.getFrameBufferPtr(acq_frame_nb);
 
                 //if accumulation mode enabled
@@ -132,24 +155,20 @@ void Camera::CameraThread::execStartAcq()
                 {
                     //DEB_TRACE() << "CameraThread::execStartAcq - in Accu mode : frame Summing Enabled";
                     // En mode accumulation image en 32 bits 
-                    memcpy((int32_t*)ptr, frame->data(), frame->size());
+                    memcpy((uint32_t*)ptr, frame->data(), frame->size());
                 }
                 else
                 {
-                    if(nDepth == 1)         // 1 byte (1 bits)
+                    if(frame_depth == 1)         // 1 byte (1 bits)
                         memcpy((uint8_t*)ptr, frame->data(), frame->size());    //we need a nb of BYTES .     
-                    else if(nDepth == 6)    // 1 byte (6 bits)
+                    else if(frame_depth == 6)    // 1 byte (6 bits)
                         memcpy((uint8_t*)ptr, frame->data(), frame->size());    //we need a nb of BYTES . 
-                    else if(nDepth == 12)   // 2  bytes, short (12 bits )                 
-                        memcpy((short*)ptr, frame->data(), frame->size());      //we need a nb of BYTES .
-                    else if(nDepth == 24)   // 4 bytes, int (24 bits)
-                        memcpy((int*)ptr, frame->data(), frame->size());        //we need a nb of BYTES .                  
+                    else if(frame_depth == 12)   // 2  bytes, short (12 bits )                 
+                        memcpy((uint16_t*)ptr, frame->data(), frame->size());   //we need a nb of BYTES .
+                    else if(frame_depth == 24)   // 4 bytes, int (24 bits)
+                        memcpy((uint32_t*)ptr, frame->data(), frame->size());   //we need a nb of BYTES .                  
                 }
-                
-                DEB_TRACE() << "frame connector - " <<frame->connector();        
-                DEB_TRACE() << "frame nr - "        <<frame->nr();        
-                DEB_TRACE() << "frame trigger - "   <<frame->trigger();        
-                DEB_TRACE() << "frame subframe - "  <<frame->subframe();        
+            
                 m_cam->decoder->release(frame);
             }
 
@@ -222,7 +241,7 @@ Camera::Camera(std::string& config_file):
     m_detector_model = "";
     std::stringstream ss;
     auto chip_ids = detector->chipIds(1);
-    ss << "Nb. modules " << detector->numberOfModules() <<" - Mod #1 Id "<< chip_ids[0];
+    ss << "Nb. modules : " << detector->numberOfModules() <<" - Mod #1 Id "<< chip_ids[0];
     m_detector_model = ss.str();
 
     try
@@ -284,7 +303,7 @@ Camera::Status Camera::getStatus()
 void Camera::setNbFrames(int nb_frames)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setNbFrames - " << DEB_VAR1(nb_frames);
+    DEB_TRACE() << "Camera::setNbFrames - nb_frames : "<<nb_frames;
     if (nb_frames < 0)
         throw LIMA_HW_EXC(InvalidValue, "Invalid nb of frames");
       
@@ -350,25 +369,31 @@ void Camera::startAcq()
     {  
         decoder->setSummedFrames((unsigned int)(m_exposure/m_exposure_i));
         bool is_summed = decoder->frameSummingEnabled();
-        DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
+        DEB_TRACE() << "Camera::startAcq - is_summed : " << is_summed;      
         int N = decoder->summedFrames();    
-        DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
+        DEB_TRACE() << "Camera::startAcq - summedFrames : " << N;            
         detector->setFrameCount((unsigned int)(m_nb_frames*N));
-        DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames*N;
+        DEB_TRACE() << "Camera::startAcq - frameCount : " << m_nb_frames*N;
+        ////detector->setFramesPerTrigger(m_nb_frames*N);
+        int framesPerTrigger = detector->framesPerTrigger();
+        DEB_TRACE() << "Camera::startAcq - framesPerTrigger : " << framesPerTrigger;
         detector->setShutterTime(m_exposure_i);
-        DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure_i;
+        DEB_TRACE() << "Camera::startAcq - shutterTime : " << m_exposure_i<<" (ms)";
     }
     else
     {
         decoder->setSummedFrames((unsigned int)(1));
         bool is_summed = decoder->frameSummingEnabled();
-        DEB_TRACE() << "Camera::startAcq - is_summed = " << is_summed;      
+        DEB_TRACE() << "Camera::startAcq - is_summed : " << is_summed;      
         int N = decoder->summedFrames();    
-        DEB_TRACE() << "Camera::startAcq - summedFrames = " << N;            
+        DEB_TRACE() << "Camera::startAcq - summedFrames : " << N;            
         detector->setFrameCount((unsigned int)(m_nb_frames));
-        DEB_TRACE() << "Camera::startAcq - frameCount = " << m_nb_frames;
+        DEB_TRACE() << "Camera::startAcq - frameCount : " << m_nb_frames;
+        ////detector->setFramesPerTrigger(1);
+        int framesPerTrigger = detector->framesPerTrigger();
+        DEB_TRACE() << "Camera::startAcq - framesPerTrigger : " << framesPerTrigger;        
         detector->setShutterTime(m_exposure);
-        DEB_TRACE() << "Camera::startAcq - shutterTime = " << m_exposure;
+        DEB_TRACE() << "Camera::startAcq - shutterTime : " << m_exposure <<" (ms)";
     }
     /////////////////////////////
     m_thread.sendCmd(CameraThread::StartAcq);
@@ -414,7 +439,7 @@ void Camera::getExpTime(double& exp_time)
 void Camera::setExpTime(double  exp_time)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setExpTime - " << DEB_VAR1(exp_time);
+    DEB_TRACE() << "Camera::setExpTime - exp_time : " << exp_time*1E3<<" (ms)";
 
     m_exposure = exp_time * 1E3;//default detector unit is ms
     detector->setShutterTime(m_exposure);
@@ -426,7 +451,7 @@ void Camera::setExpTime(double  exp_time)
 void Camera::setTrigMode(TrigMode  mode)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setTrigMode - " << DEB_VAR1(mode);
+    DEB_TRACE() << "Camera::setTrigMode - mode : "<<mode;
     DEB_PARAM() << DEB_VAR1(mode);
 
     switch (mode) 
@@ -501,10 +526,10 @@ void Camera::getUpperEnergyThreshold(double& energy_threshold)
 void Camera::setEnergyThresholds(double lower_energy_threshold, double upper_energy_threshold)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setEnergyThresholds - set lowerThreshold " << DEB_VAR1(lower_energy_threshold);
+    DEB_TRACE() << "Camera::setEnergyThresholds - lowerThreshold : " << lower_energy_threshold;
     DEB_PARAM() << DEB_VAR1(lower_energy_threshold);
 
-    DEB_TRACE() << "Camera::setEnergyThresholds - set upperThreshold " << DEB_VAR1(upper_energy_threshold);
+    DEB_TRACE() << "Camera::setEnergyThresholds - upperThreshold : " << upper_energy_threshold;
     DEB_PARAM() << DEB_VAR1(upper_energy_threshold);
 
     detector->setThresholds(std::vector<double>{lower_energy_threshold, upper_energy_threshold});
@@ -562,7 +587,7 @@ void Camera::setHighVoltage(double high_voltage)
 void Camera::setImageType(ImageType type)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setImageType - " << DEB_VAR1(type);
+    DEB_TRACE() << "Camera::setImageType - type : " << type;
 
     xsp::lambda::BitDepth depth;
     if(type == Bpp1)
@@ -831,7 +856,7 @@ void Camera::checkDependency(double exposure_i)
 void Camera::setExposureAccuTime(double exposureAccuTime)
 { 
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setExposureAccuTime - " << DEB_VAR1(exposureAccuTime);
+    DEB_TRACE() << "Camera::setExposureAccuTime - exposureAccuTime : " << exposureAccuTime<< " (ms)";
     double exposureByFrame = exposureAccuTime;
     if (exposureByFrame <= 0.0 || exposureByFrame > m_exposure)
         LIMA_HW_EXC(InvalidValue, "Exposure by frame should be positive, greather than zero, in milliseconds and less than global exposure.");
@@ -856,13 +881,13 @@ void Camera::setAccumulationMode(bool accumulationMode)
 void Camera::setAcquisitionMode(int acq_mode)
 {
     DEB_MEMBER_FUNCT();
-    DEB_TRACE() << "Camera::setAcquisitionMode - " << DEB_VAR1(acq_mode);
+    DEB_TRACE() << "Camera::setAcquisitionMode - acq_mode : " << acq_mode;
 
     if (acq_mode != 1 && acq_mode != 6 && acq_mode != 12 && acq_mode != 24)
         throw LIMA_HW_EXC(InvalidValue, "Acquisition mode should be 1, 6, 12 or 24 bits");
 
     if ((acq_mode == 1 || acq_mode == 6) && !hasFeature(xsp::lambda::Feature::FEAT_1_6_BIT))
-        throw LIMA_HW_EXC(Error, "The device does not support 1 and 6 bits");
+        throw LIMA_HW_EXC(Error, "The firmware does not support 1 and 6 bits");
 
     switch(acq_mode) 
     {
@@ -872,7 +897,6 @@ void Camera::setAcquisitionMode(int acq_mode)
         case 24: detector->setBitDepth(xsp::lambda::BitDepth::DEPTH_24); break;
         default: break;
     }
-    //m_acquisition_mode = acq_mode;
 }
 
 //---------------------------------------------------------------------------------------
@@ -882,7 +906,7 @@ void Camera::setAcquisitionMode(int acq_mode)
 void Camera::getAcquisitionMode(int &acq_mode)
 {
     DEB_MEMBER_FUNCT();
-    //acq_mode = m_acquisition_mode;
+
     xsp::lambda::BitDepth bitDepth = detector->bitDepth();
     switch(bitDepth) 
     {
